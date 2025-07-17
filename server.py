@@ -99,7 +99,7 @@ async def get_food_items():
     return active_items
 
 # Demo data population
-@app.post("/api/demo/populate")
+@app.get("/api/demo/populate")
 async def populate_demo_data():
     global restaurants_db, food_items_db
     
