@@ -120,7 +120,7 @@ class RestaurantCreate(BaseModel):
     cuisine_type: str
     description: str
     image_url: str
-  class FoodItem(BaseModel):
+class FoodItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     restaurant_id: str
     name: str
