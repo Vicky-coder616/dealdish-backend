@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from motor.motor_asyncio import AsyncIOMotorClient
 from typing import List, Optional
 import os
 import uvicorn
@@ -9,14 +8,11 @@ from datetime import datetime, timedelta
 
 app = FastAPI(title="DealDish API", description="Food waste reduction platform")
 
-# MongoDB connection
-mongo_url = os.environ.get('MONGO_URL')
-if mongo_url:
-    client = AsyncIOMotorClient(mongo_url)
-    db = client[os.environ.get('DB_NAME', 'dealdish_prod')]
-else:
-    client = None
-    db = None
+# In-memory storage (temporary)
+users_db = []
+restaurants_db = []
+food_items_db = []
+orders_db = []
 
 # Models
 class User(BaseModel):
@@ -58,101 +54,118 @@ class FoodItem(BaseModel):
 # Basic endpoints
 @app.get("/")
 async def root():
-    return {"message": "DealDish API is running!", "status": "success"}
+    return {"message": "DealDish API is running!", "status": "success", "version": "2.0"}
 
 @app.get("/api/health")
 async def health():
-    return {"status": "healthy", "app": "dealdish-backend", "database": "connected" if db else "not configured"}
+    return {
+        "status": "healthy", 
+        "app": "dealdish-backend", 
+        "database": "in-memory",
+        "restaurants_count": len(restaurants_db),
+        "food_items_count": len(food_items_db)
+    }
 
 # Analytics
 @app.get("/api/analytics/food-waste-saved")
 async def get_food_waste_saved():
-    if db:
-        # Real data from database
-        orders_count = await db.orders.count_documents({}) if await db.orders.count_documents({}) else 0
-        waste_saved = orders_count * 0.5
-    else:
-        # Demo data
-        waste_saved = 150.5
-        orders_count = 42
+    orders_count = len(orders_db)
+    waste_saved = orders_count * 0.5
     return {"total_waste_saved_kg": waste_saved, "total_orders": orders_count}
 
 # User registration
 @app.post("/api/auth/register")
 async def register_user(user: UserCreate):
-    if not db:
-        return {"message": "Database not configured", "user": user.dict()}
-    
     # Check if user exists
-    existing_user = await db.users.find_one({"email": user.email})
+    existing_user = next((u for u in users_db if u["email"] == user.email), None)
     if existing_user:
         raise HTTPException(status_code=400, detail="User already exists")
     
     user_obj = User(**user.dict())
-    await db.users.insert_one(user_obj.dict())
+    users_db.append(user_obj.dict())
     return {"message": "User registered successfully", "user": user_obj}
 
 # Get restaurants
 @app.get("/api/restaurants")
 async def get_restaurants():
-    if not db:
-        # Demo data
-        return [
-            {
-                "id": "demo-1",
-                "name": "Luigi's Italian Kitchen",
-                "address": "123 Collins Street, Melbourne",
-                "cuisine_type": "Italian",
-                "description": "Authentic Italian cuisine",
-                "rating": 4.5
-            }
-        ]
-    
-    restaurants = await db.restaurants.find({}).to_list(100)
-    return restaurants
+    return restaurants_db
+
+# Get food items
+@app.get("/api/food-items")
+async def get_food_items():
+    # Filter out expired items
+    current_time = datetime.utcnow()
+    active_items = [item for item in food_items_db if datetime.fromisoformat(item["expires_at"].replace("Z", "+00:00")) > current_time]
+    return active_items
 
 # Demo data population
 @app.post("/api/demo/populate")
 async def populate_demo_data():
-    if not db:
-        return {"message": "Database not configured - using demo data"}
+    global restaurants_db, food_items_db
     
     # Clear existing data
-    await db.restaurants.delete_many({})
-    await db.food_items.delete_many({})
+    restaurants_db.clear()
+    food_items_db.clear()
     
-    # Create demo restaurant
-    demo_restaurant = {
-        "id": str(uuid.uuid4()),
-        "name": "Luigi's Italian Kitchen",
-        "address": "123 Collins Street, Melbourne VIC 3000",
-        "cuisine_type": "Italian", 
-        "description": "Authentic Italian cuisine in the heart of Melbourne",
-        "rating": 4.5,
-        "commission_rate": 0.10,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.restaurants.insert_one(demo_restaurant)
-    
-    # Create demo food items
-    for i in range(3):
-        expires_at = datetime.utcnow() + timedelta(hours=2 + i)
-        food_item = {
+    # Create demo restaurants
+    demo_restaurants = [
+        {
             "id": str(uuid.uuid4()),
-            "restaurant_id": demo_restaurant["id"],
-            "name": f"Chef's Special {i+1}",
-            "description": f"Delicious Italian dish prepared fresh today",
-            "original_price": 25.0 + (i * 5),
-            "discounted_price": 15.0 + (i * 3),
-            "discount_percentage": 40,
-            "quantity_available": 5 - i,
-            "expires_at": expires_at,
-            "created_at": datetime.utcnow()
+            "name": "Luigi's Italian Kitchen",
+            "address": "123 Collins Street, Melbourne VIC 3000",
+            "cuisine_type": "Italian", 
+            "description": "Authentic Italian cuisine in the heart of Melbourne",
+            "rating": 4.5,
+            "commission_rate": 0.10,
+            "created_at": datetime.utcnow().isoformat()
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "name": "Green Garden Bistro",
+            "address": "456 Flinders Lane, Melbourne VIC 3000",
+            "cuisine_type": "Healthy", 
+            "description": "Fresh, sustainable dining with locally sourced ingredients",
+            "rating": 4.7,
+            "commission_rate": 0.10,
+            "created_at": datetime.utcnow().isoformat()
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "name": "Spice Route",
+            "address": "789 Chapel Street, South Yarra VIC 3141",
+            "cuisine_type": "Indian", 
+            "description": "Traditional Indian flavors with modern presentation",
+            "rating": 4.3,
+            "commission_rate": 0.10,
+            "created_at": datetime.utcnow().isoformat()
         }
-        await db.food_items.insert_one(food_item)
+    ]
     
-    return {"message": "Demo data populated successfully"}
+    restaurants_db.extend(demo_restaurants)
+    
+    # Create demo food items for each restaurant
+    for restaurant in demo_restaurants:
+        for i in range(3):
+            expires_at = datetime.utcnow() + timedelta(hours=2 + i)
+            food_item = {
+                "id": str(uuid.uuid4()),
+                "restaurant_id": restaurant["id"],
+                "name": f"Chef's Special {i+1}",
+                "description": f"Delicious {restaurant['cuisine_type']} dish prepared fresh today",
+                "original_price": 25.0 + (i * 5),
+                "discounted_price": 15.0 + (i * 3),
+                "discount_percentage": 40,
+                "quantity_available": 5 - i,
+                "expires_at": expires_at.isoformat(),
+                "created_at": datetime.utcnow().isoformat()
+            }
+            food_items_db.append(food_item)
+    
+    return {
+        "message": "Demo data populated successfully",
+        "restaurants_created": len(demo_restaurants),
+        "food_items_created": len(demo_restaurants) * 3
+    }
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
