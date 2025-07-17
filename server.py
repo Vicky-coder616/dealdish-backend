@@ -93,10 +93,7 @@ async def get_restaurants():
 # Get food items
 @app.get("/api/food-items")
 async def get_food_items():
-    # Filter out expired items
-    current_time = datetime.utcnow()
-    active_items = [item for item in food_items_db if datetime.fromisoformat(item["expires_at"].replace("Z", "+00:00")) > current_time]
-    return active_items
+    return food_items_db
 
 # Demo data population
 @app.get("/api/demo/populate")
